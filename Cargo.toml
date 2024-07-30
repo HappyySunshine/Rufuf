@@ -1,0 +1,18 @@
+[package]
+name = "rufuf"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.86"
+crossterm = "0.27.0"
+itertools = "0.13.0"
+ratatui = {version = "0.26.2", features= ["termion"]}
+# termion = "4.0.0"
+tokio = "1.37.0"
+tokyo = "1.0.0"
+file-logger = {path="../file-logger"}
+mlua = {version = "0.9.8", features =["lua52", "vendored"] }
+
