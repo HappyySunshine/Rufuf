@@ -269,9 +269,13 @@ fn calculate_entries(root_dir: ReadDir, depth: usize)-> Result<Vec<FsEntry>>{
         let file_name = entry.file_name();
         let name = file_name.to_str().unwrap();
         if file_type.is_dir(){
+            let children_count = 0;
+
+            // buffer.push(FsEntry{entry, entry_type: EntryType::File, open: false,  depth, children_count });
             let dir = fs::read_dir(entry.path())?;
             let mut nodes = calculate_entries(dir, depth+ 1)?;
-            buffer.push(FsEntry{entry, entry_type: EntryType::File, open: false,  depth, nodes: Some(nodes)});
+            buffer.push(FsEntry{entry, entry_type: EntryType::File, open: false,  depth, children_count });
+            buffer.push(FsEntry{entry, entry_type: EntryType::File, open: false,  depth });
         }
         else{
             buffer.push(FsEntry{entry, entry_type: EntryType::File, open: false,  depth, nodes:None});

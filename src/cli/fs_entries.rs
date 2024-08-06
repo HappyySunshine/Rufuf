@@ -26,14 +26,12 @@ pub struct FsEntry{
     pub entry_type: EntryType,
     pub open: bool,
     pub entry: DirEntry,
-    pub depth: usize,
+    pub children_count: usize,
+    // pub depth: usize,
    // pub line : Line<'static>,
-   pub nodes: Option<Vec<FsEntry>>
+   // pub nodes: Option<Vec<FsEntry>>
 }
 
-pub struct FsList<'a>{
-    pub nodes: Vec<&'a mut FsEntry>
-}
 
 #[derive(Debug)]
 pub struct FsListLayout{
@@ -78,30 +76,6 @@ impl FsEntry{
 //
 //
 
-impl FsList<'_>{
-    pub fn click_at(&self, state: &ListState, index: u16)-> Option<&FsEntry>{
-        let at = state.offset() +index as usize;
-        let entry = self.nodes.get(at);
-        match entry{
-            Some(entry)=>{
-                return Some(entry)
-            }
-            None=>{
-                return None
-            }
-        }
-    }
-
-    pub fn to_list(&self, config: &Lua)-> List{
-        let mut buffer = vec!();
-        for entry in self.nodes{
-            buffer.push(entry.to_line(config));
-            
-        }
-        return List::new(buffer);
-
-    }
-}
 
 impl FsListLayout{
     pub fn new(root_dir: ReadDir, depth : usize)-> Result<Self>{
@@ -119,47 +93,25 @@ impl FsListLayout{
         return buffer;
     }
 
-    pub fn to_fs_vec(&mut self, config: &Lua)-> Vec<&mut FsEntry>{
-        let mut buffer = vec!();
-        for entry in self.nodes.iter_mut(){
-            // buffer.push(entry);
-            if entry.open && entry.nodes.is_some(){
-                let mut other = self.to_fs_vec(config);
-                buffer.append(&mut other);
+
+    pub fn to_list(&self, config: &Lua)-> List<'static>{
+        let vec = self.to_line_vec(config);
+        let list = List::new(vec);
+        return list;
+    }
+    //
+    //
+    pub fn click_at(&mut self, index: u16)-> Option<&FsEntry>{
+        let at = self.state.offset() +index as usize;
+        let entry = self.nodes.get(at);
+        match entry{
+            Some(entry)=>{
+                return Some(entry)
+            }
+            None=>{
+                return None
             }
         }
-        buffer
-        // FsList{nodes: buffer}
+   
     }
-
-    pub fn to_fs_list(&self, config: &Lua)-> FsList{
-        let nodes = self.to_fs_vec(config);
-        return FsList{nodes}
-    }
-
-    // pub fn to_line(&self, node:&FsEntry, config: Lua, ident: usize)-> Line<'static>{
-        // todo!()
-
-    // }
-
-    // pub fn to_list(&self, config: Lua)-> List<'static>{
-    //     let vec = self.to_line_vec(config);
-    //     let list = List::new(vec);
-    //     return list;
-    // }
-    //
-    //
-//     pub fn click_at(&mut self, index: u16)-> Option<&FsEntry>{
-//         let at = self.state.offset() +index as usize;
-//         let entry = self.nodes.get(at);
-//         match entry{
-//             Some(entry)=>{
-//                 return Some(entry)
-//             }
-//             None=>{
-//                 return None
-//             }
-//         }
-//    
-//     }
 }
