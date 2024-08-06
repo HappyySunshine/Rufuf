@@ -1,4 +1,4 @@
-use std::{ any::Any, borrow::{Borrow, BorrowMut}, fs::{self, DirEntry, ReadDir}, hash::Hash, io::Stdout, ops::{Index, IndexMut}, sync::Mutex, u16, vec};
+use std::{ any::Any, borrow::{Borrow, BorrowMut}, fs::{self, DirEntry, ReadDir}, hash::Hash, io::Stdout, ops::{Deref, Index, IndexMut}, sync::{Arc, Mutex}, u16, vec};
 
 use anyhow::{anyhow, bail, Result};
 use crossterm::{cursor::EnableBlinking, ExecutableCommand};
@@ -74,143 +74,151 @@ impl<'a> DisplayPanelsLayout<'a>{
     pub fn get_focused(&'a self)-> &DisplayPanel{
         return self.panels.get(self.current_focused).unwrap();
     }
+
+    fn empty() -> DisplayPanelsLayout<'static> {
+        return DisplayPanelsLayout{panels: vec!(), current_focused: 0}
+    }
 }
 //
-enum Directions{
-    Right,
-    Down,
-    None,
+// enum Directions{
+//     Right,
+//     Down,
+//     None,
+// }
+
+struct Index_Pos{
+    index: usize,
+    pos: usize
+}
+impl Index_Pos{
+    pub fn new(index:usize, pos:usize)-> Self{
+        return Index_Pos{index, pos}
+        
+    }
 }
 
-pub fn run(mut term: Terminal<CrosstermBackend<Stdout>>, lua : Lua)-> Result<()>{
+enum  Actions {
+    Click(Index_Pos ),
+    None,
+    
+}
+
+pub fn run(mut term: Terminal<CrosstermBackend<Stdout>>, config : Lua)-> Result<()>{
     let root_dir = fs::read_dir(".")?;
     let mut list_layout = FsListLayout::new(root_dir, 1)?;
     let mut layout = RufufLayout::new(PanelType::FsList(list_layout));
-    layout.add(PanelType::ShowData);
-    // let mut display_panels : Vec<DisplayPanel> = vec!();
-    // let mut current_focused: Option<DisplayPanel> = None;
     let mut display_panels: DisplayPanelsLayout = DisplayPanelsLayout{panels: vec!(), current_focused: 0};
-    // let directions = vec!(Directions::None);
+    layout.add(PanelType::ShowData);
+    // let conf = config.borrow();
 
-    term.draw(|frame|{ui(frame, &mut layout, &mut display_panels)})?;
+    term.draw(|frame|{ui(frame, &layout, &mut display_panels, &config)})?;
     term.show_cursor()?;
     term.set_cursor(1, 1)?;
-    // loop{
 
-    // }
     loop{
+        // let a = Arc::new(config);
         let event = events::get_event()?;
-        let result = handle_event(event, &mut term, &mut layout, &mut display_panels);
+        let result = handle_event(event, &mut term,  &layout, &mut display_panels);
         if result.is_err(){
             break
         }
-        match event{
-            events::Event::Close => {break;},
-            events::Event::MoveCursor(direction) =>{
-                let cursor_pos = term.get_cursor()?;
-                let new_pos = direction.add_to_cursor(cursor_pos);
-                // layout.current_focused_panel
-                // let area = current_focused.as_ref().unwrap().area;
-                let area = display_panels.get_focused().area;
-                let new_pos = clamp(new_pos, area, true);
-                term.set_cursor(new_pos.0 , new_pos.1)?;
-    
-            },
-            events::Event::ChangePanel(direction)=>{
-                {
-                    let result = display_panels.get_panel(direction);
-                    if result.is_none(){
-                        continue
-                    }
-                    display_panels.current_focused = result.unwrap();
-                    let new_area = display_panels.get_focused().area;
-                    let cursor = (new_area.x, new_area.y);
-                    let new_pos = clamp(cursor, new_area, true);
-                    term.set_cursor(new_pos.0, new_pos.1)?;
+        match result.unwrap(){
+            Actions::Click(index_pos) => {
+                display_panels = DisplayPanelsLayout::empty();
+                let panel = layout.panels.get_mut(index_pos.index).unwrap();
+                if let PanelType::FsList(list) = panel{
+                    let fs_list = list.to_fs_list(&config);
+
+                    // file_dbg!(lista);
+                    term.draw(|frame|{ui(frame, &layout, &mut display_panels, &config)})?;
 
                 }
-
             },
-            events::Event::Click=>{
-                file_log!("CLICK");
-                // let display_panel = display_panels.get_focused();
-                // let panel = display_panel.panel.borrow_mut();
-                let panel = layout.panels.get_mut(3).unwrap();
-                if let PanelType::FsList( list) = panel{
-                    list.click_at(3);
-
-                }
-                
-
-                // list_layout.click_at(3);
-                // let cursor_pos = term.get_cursor()?;
-                // let result = list_layout.click_at(cursor_pos.1 - 1);
-                // match result{
-                //     Ok(list)=> {
-                //         // let mut state = list_layout.state.clone();
-                //         let mut state = ListState::default();
-                //         term.draw(|frame|{ui2(frame, list, &mut state)})?; term.show_cursor()?;
-                //         term.set_cursor(cursor_pos.0, cursor_pos.1)?;
-                //         file_log!("enter pressed");
-                //         },
-                //     Err(_) => {}
-                // }
-            },
-            events::Event::ShowData =>{
-    
-            },
-            events::Event::Continue =>{}
+            Actions::None => {},
         }
+    
     }
     Ok(())
 }
 
-fn handle_event(event: Event  term: &mut Terminal<CrosstermBackend<Stdout>>, layout: &mut RufufLayout, display_panels: &mut DisplayPanelsLayout<'static>) -> Result<()> {
-    Ok(())
+fn handle_event<'a,'b,'c>(event: Event,  term: &mut Terminal<CrosstermBackend<Stdout>>, layout: &'a RufufLayout, display_panels: &'b mut DisplayPanelsLayout<'c>) -> 
+Result<Actions> 
+where  'a: 'c{
+    match event{
+        events::Event::Close => {bail!("errorrrr");},
+        events::Event::MoveCursor(direction) =>{
+            let cursor_pos = term.get_cursor()?;
+            let new_pos = direction.add_to_cursor(cursor_pos);
+            // layout.current_focused_panel
+            // let area = current_focused.as_ref().unwrap().area;
+            let area = display_panels.get_focused().area;
+            let new_pos = clamp(new_pos, area, true);
+            term.set_cursor(new_pos.0 , new_pos.1)?;
+
+        },
+        events::Event::ChangePanel(direction)=>{
+            {
+                let result = display_panels.get_panel(direction);
+                if result.is_none(){
+                   return Ok(Actions::None)
+                }
+                display_panels.current_focused = result.unwrap();
+                let new_area = display_panels.get_focused().area;
+                let cursor = (new_area.x, new_area.y);
+                let new_pos = clamp(cursor, new_area, true);
+                term.set_cursor(new_pos.0, new_pos.1)?;
+
+            }
+
+        },
+        events::Event::Click=>{
+            file_log!("CLICK");
+            return Ok(Actions::Click(Index_Pos::new(0,3)))
+            // let display_panel = display_panels.get_focused();
+            // let panel = display_panel.panel.borrow_mut();
+            // let panel = layout.panels.get_mut(3).unwrap();
+            // if let PanelType::FsList( list) = panel{
+                // list.click_at(3);
+
+            // }
+        },
+   
+   
+        events::Event::ShowData =>{
+
+        },
+        events::Event::Continue =>{}
+        }
+    Ok(Actions::None)
 }
 
-fn ui2(frame: &mut Frame, list: List,  state: &mut ListState){
-    let layout = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]);
-    let areas = layout.areas::<2>(frame.size());
-    let main_area =  Rect::new(1, 1,  areas[0].width -2, areas[0].height -1);
-    let widget = Block::bordered().title("../rust/rufuf/");
-    frame.render_widget(widget, areas[0]);
-    frame.render_stateful_widget(list, main_area, state)
-}
+// fn ui2(frame: &mut Frame, list: List,  state: &mut ListState){
+//     let layout = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]);
+//     let areas = layout.areas::<2>(frame.size());
+//     let main_area =  Rect::new(1, 1,  areas[0].width -2, areas[0].height -1);
+//     let widget = Block::bordered().title("../rust/rufuf/");
+//     frame.render_widget(widget, areas[0]);
+//     frame.render_stateful_widget(list, main_area, state)
+// }
 
-fn ui<'b, 'a, 'c>(frame: &mut Frame, panels_layout: &'a mut RufufLayout, mut current_focused: &'b mut DisplayPanelsLayout<'c>) 
-where 'a: 'b, 'a: 'c{
-    let mut display_panels = panels_layout.get_display_frames(&frame).unwrap();
+fn ui<'b, 'a, 'c>(frame: &mut Frame, panels_layout: &'a RufufLayout, current_focused: &'b mut DisplayPanelsLayout<'c>, config: &Lua) 
+where  'a : 'c {
+    let display_panels = panels_layout.get_display_frames(&frame).unwrap();
     for display_panel in display_panels.iter(){
         match display_panel.panel{
             PanelType::FsList(list) =>{
                 let mut state = ListState::default();
-                let list = list.to_list().block(Block::bordered().title("list"));
-                // frame.render_widget(widget, area)
+                let fs_list = list.to_fs_list(config);
+                let list = fs_list.to_list(config).block(Block::bordered().title("list"));
+                // let list = list.to_list(config,0).block(Block::bordered().title("list"));
                 frame.render_stateful_widget(list, display_panel.area, &mut state);
-                // file_log!("just pritned the list??");
-                let a = display_panel.area;
-                // file_dbg!(a);
-
-            } 
-
-            ,
+            },
             PanelType::ShowData => {
 
             },
         }
     }
     current_focused.panels = display_panels;
-    // *current_focused = Some(display_panels.pop().unwrap());
-    // panels_layout.draw_to_frame(frame);
-    // let layout = calculate_layout(frame.size());
-    // let main_layout = layout[0];
-    // let mut state = ListState::default();
-    // let widget = Block::bordered().title("../rust/rufuf/");
-    // let main_area =  Rect::new(1, 1, main_layout.width -2,main_layout.height -1);
-    // frame.render_widget(widget, main_layout);
-    // let list = list_layout.to_list();
-    // frame.render_stateful_widget(list, main_area, &mut state);
 }
 
 
@@ -252,7 +260,7 @@ fn calculate_layout(area: Rect)-> Vec<Rect>{
 
 }
 
-fn calculate_entries(root_dir: ReadDir, depth: u8)-> Result<Vec<FsEntry>>{
+fn calculate_entries(root_dir: ReadDir, depth: usize)-> Result<Vec<FsEntry>>{
     let mut buffer = vec!();
     // let dir = fs::read_dir(root_dir.path())?;
     for entry in root_dir{
@@ -261,25 +269,14 @@ fn calculate_entries(root_dir: ReadDir, depth: u8)-> Result<Vec<FsEntry>>{
         let file_name = entry.file_name();
         let name = file_name.to_str().unwrap();
         if file_type.is_dir(){
-            if depth == 0{
-               let line = Line::from(format!("{}",name)).blue();
-                
-               buffer.push(FsEntry{entry, entry_type: EntryType::Directory, line,  open: false, nodes: None});
-            }
-            else{
-                let line = Line::from(format!("{}",name)).blue();
-                let dir = fs::read_dir(entry.path())?;
-                let other_nodes = calculate_entries(dir, depth-1)?;
-                buffer.push(FsEntry{entry, entry_type: EntryType::Directory, open: false, line, nodes: Some(other_nodes)});
-            }
+            let dir = fs::read_dir(entry.path())?;
+            let mut nodes = calculate_entries(dir, depth+ 1)?;
+            buffer.push(FsEntry{entry, entry_type: EntryType::File, open: false,  depth, nodes: Some(nodes)});
         }
         else{
-            let line = Line::from(format!("{}",name)).white();
-            buffer.push(FsEntry{entry, entry_type: EntryType::File, open: false, line, nodes: None});
+            buffer.push(FsEntry{entry, entry_type: EntryType::File, open: false,  depth, nodes:None});
         }
     }
-
-    
     Ok(buffer)
 }
 

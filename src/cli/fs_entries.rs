@@ -1,6 +1,8 @@
-use std::fs::{DirEntry, ReadDir};
+use std::{fs::{DirEntry, ReadDir}, str::FromStr, sync::Arc};
 
 use anyhow::{bail, Result};
+use crossterm::style::Color;
+use mlua::{Lua, Table};
 use ratatui::{buffer::Buffer, layout::Rect, style::Stylize, text::Line, widgets::{List, ListState, StatefulWidget}};
 
 use super::calculate_entries;
@@ -21,12 +23,18 @@ pub enum EntryType{
 
 #[derive(Debug)]
 pub struct FsEntry{
-   pub entry_type: EntryType,
-   pub open: bool,
-   pub entry: DirEntry,
-   pub line : Line<'static>,
+    pub entry_type: EntryType,
+    pub open: bool,
+    pub entry: DirEntry,
+    pub depth: usize,
+   // pub line : Line<'static>,
    pub nodes: Option<Vec<FsEntry>>
 }
+
+pub struct FsList<'a>{
+    pub nodes: Vec<&'a mut FsEntry>
+}
+
 #[derive(Debug)]
 pub struct FsListLayout{
     pub nodes: Vec<FsEntry>,
@@ -35,8 +43,11 @@ pub struct FsListLayout{
 }
 
 impl FsEntry{
-    pub fn to_line(&self, ident_level:usize)-> Line<'static>{
-        let spaces = " ".repeat(ident_level * 4);
+    pub fn to_line(&self, config: &Lua)-> Line<'static>{
+        let colors: Table = config.globals().get("colors").unwrap();
+        let white: String = colors.get("white").unwrap();
+        let blue: String = colors.get("white").unwrap();
+        let spaces = " ".repeat(self.depth  * 4);
         let name = self.entry.file_name().into_string().unwrap();
         if self.entry_type == EntryType::File{
             let line =Line::from(format!("{spaces}{name}")).white(); 
@@ -49,69 +60,106 @@ impl FsEntry{
     }
 
 }
-impl StatefulWidget for FsListLayout{
-    type State = ListState;
 
-    fn render(mut self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let a = self.nodes.into_iter().map(|entry|{
-            entry.line
-        }).collect::<Vec<_>>();
-        let list = List::new(a);
-        list.render(area, buf, &mut self.state);
+
+// impl StatefulWidget for FsListLayout{
+//     type State = ListState;
+//
+//     fn render(mut self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+//         // let a = self.nodes.into_iter().map(|entry|{
+//         //     entry.line
+//         // }).collect::<Vec<_>>();
+//         let list = self.to_list(config, ident)
+//         let list = List::new(a);
+//         list.render(area, buf, &mut self.state);
+//     }
+//
+// }
+//
+//
+
+impl FsList<'_>{
+    pub fn click_at(&self, state: &ListState, index: u16)-> Option<&FsEntry>{
+        let at = state.offset() +index as usize;
+        let entry = self.nodes.get(at);
+        match entry{
+            Some(entry)=>{
+                return Some(entry)
+            }
+            None=>{
+                return None
+            }
+        }
     }
 
+    pub fn to_list(&self, config: &Lua)-> List{
+        let mut buffer = vec!();
+        for entry in self.nodes{
+            buffer.push(entry.to_line(config));
+            
+        }
+        return List::new(buffer);
+
+    }
 }
+
 impl FsListLayout{
-    pub fn new(root_dir: ReadDir, depth : u8)-> Result<Self>{
+    pub fn new(root_dir: ReadDir, depth : usize)-> Result<Self>{
         let entries = calculate_entries(root_dir, depth)?;
         Ok(FsListLayout{nodes: entries, state: ListState::default() })
     }
 
-    pub fn to_list(&self)-> List<'static>{
-        let a = self.nodes.iter().map(|node|{
-            node.line.clone()
-        }).collect::<Vec<_>>();
-        let list = List::new(a);
-        return list
+    pub fn to_line_vec(&self, config: &Lua) -> Vec<Line<'static>>{
+        // let config = Arc::new(config);
+        let mut buffer = vec!();
+        for entry in self.nodes{
+            buffer.push(entry.to_line(config));
+            
+        }
+        return buffer;
     }
 
-    // fn to_vec(&mut self)-> Vec<&mut FsEntry>{
-    // }
-
-    pub fn click_at(&mut self, index: u16)-> Result<List>{
-        let at = self.state.offset() +index as usize;
+    pub fn to_fs_vec(&mut self, config: &Lua)-> Vec<&mut FsEntry>{
         let mut buffer = vec!();
-        let mut i = 0;
         for entry in self.nodes.iter_mut(){
-            let mut indent=0;
-            if i == at{
-                if entry.entry_type == EntryType::File{
-                    bail!("bbanana")
-                }
-                entry.open = !entry.open;
-            }
-            buffer.push(entry.to_line(indent));
-            i+=1;
-            if entry.open{
-                // let Some(other_entries) = entry.nodes;
-                match entry.nodes.as_mut(){
-                    Some(other_entries)=>{
-                        indent +=1;
-                        for other_entry in other_entries.iter_mut(){
-                            if i == at{
-                                if other_entry.entry_type == EntryType::File{
-                                    bail!("bbanana")
-                                }
-                                other_entry.open = !other_entry.open;
-                            }
-                            buffer.push(other_entry.to_line(indent));
-                            i+=1;
-                        }
-                    },
-                    None=>{}
-                }
+            // buffer.push(entry);
+            if entry.open && entry.nodes.is_some(){
+                let mut other = self.to_fs_vec(config);
+                buffer.append(&mut other);
             }
         }
-        Ok(List::new(buffer))
+        buffer
+        // FsList{nodes: buffer}
     }
+
+    pub fn to_fs_list(&self, config: &Lua)-> FsList{
+        let nodes = self.to_fs_vec(config);
+        return FsList{nodes}
+    }
+
+    // pub fn to_line(&self, node:&FsEntry, config: Lua, ident: usize)-> Line<'static>{
+        // todo!()
+
+    // }
+
+    // pub fn to_list(&self, config: Lua)-> List<'static>{
+    //     let vec = self.to_line_vec(config);
+    //     let list = List::new(vec);
+    //     return list;
+    // }
+    //
+    //
+//     pub fn click_at(&mut self, index: u16)-> Option<&FsEntry>{
+//         let at = self.state.offset() +index as usize;
+//         let entry = self.nodes.get(at);
+//         match entry{
+//             Some(entry)=>{
+//                 return Some(entry)
+//             }
+//             None=>{
+//                 return None
+//             }
+//         }
+//    
+//     }
 }
