@@ -1,90 +1,100 @@
-use std::{i16, num::Wrapping, u16};
+use anyhow::{anyhow, Result};
+use crossterm::event::{self, Event};
+use futures::{FutureExt, StreamExt};
+use swift_vec::vector::Vec2;
+use tokio::{select, sync::mpsc::{self, UnboundedReceiver, UnboundedSender}, time::Interval};
 
-use anyhow::Result;
-use crossterm::event::{self, KeyCode, KeyModifiers};
-// use ratatui::layout::Direction;
 
-
-pub enum Event {
-    Close,
-    Continue,
-    MoveCursor(CursorMov),
-    Click,
-    ShowData,
-    ChangePanel(CursorMov)
-}
-
-pub struct CursorMov{
-    pub x : i16,
-    pub y : i16,
-}
-
-impl CursorMov{
-    fn new(x: i16,y : i16)-> Self{
-        return CursorMov{x,y}
-    }
-   pub fn add_to_cursor(&self, cursor: (u16, u16))->(u16, u16){
-        let mut x = self.x + cursor.0 as i16;
-        let mut y = self.y + cursor.1 as i16;
-        if x<0{
-            x = 0;
-        }
-        if y <0{
-            y=0;
-        }
-        return (x as u16, y as u16);
-    }
+pub struct EventHandler{
+    pub rx: UnboundedReceiver<Actions>
 }
 
 
-use file_logger::*;
-pub fn get_event()-> Result<Event>{
-    let mod1 = KeyModifiers::CONTROL;
-    if event::poll(std::time::Duration::from_millis(50))? {
-        if let crossterm::event::Event::Key(key) = event::read()? {
-            if key.kind == event::KeyEventKind::Press{
-                if key.modifiers.contains(KeyModifiers::CONTROL){
-                    if key.code == KeyCode::Right{
-                        return Ok(Event::ShowData)
-                    }
-                }
-                if key.code == KeyCode::Char('q') {
 
-                    return Ok(Event::Close);
+
+pub enum Actions{
+    Quit,
+    Tick,
+    Select,
+    Redraw,
+    ToggleViewer,
+    Move(Vec2<i16>),
+}
+
+
+fn handle_event(tx: &UnboundedSender<Actions>, event: Event )-> Result<()>{
+      match event {
+        Event::Key(key) => {
+          if key.kind == event::KeyEventKind::Press {
+                if  key.code == event::KeyCode::Char('q'){
+                    tx.send(Actions::Quit)?;
                 }
-                if key.code == KeyCode::Char('j') {
-                    if key.modifiers.contains(mod1){
-                        file_log!(level="IDK", "going down");
-                        return Ok(Event::ChangePanel(CursorMov::new(0,1)));
+                if  key.code == event::KeyCode::Char('h'){
+                    tx.send(Actions::Move(Vec2(-1,0)))?;
+                }
+                if  key.code == event::KeyCode::Char('l'){
+                    tx.send(Actions::Move(Vec2(1,0)))?;
+                }
+                if  key.code == event::KeyCode::Char('j'){
+                    tx.send(Actions::Move(Vec2(0,1)))?;
+                }
+                if  key.code == event::KeyCode::Char('k'){
+                    tx.send(Actions::Move(Vec2(0,-1)))?;
+                }
+                if  key.code == event::KeyCode::Enter{
+                    tx.send(Actions::Select)?;
+                }
+                if  key.code == event::KeyCode::Char('v'){
+                    tx.send(Actions::ToggleViewer)?;
+                }
+          }
+        },
+        Event::FocusGained => todo!(),
+        Event::FocusLost => todo!(),
+        Event::Mouse(_) => {},
+        Event::Paste(_) => todo!(),
+        Event::Resize(_, _) => {tx.send(Actions::Redraw).unwrap()},
+        // _ => {},
+      }
+    Ok(())
+
+}
+impl EventHandler{
+    pub fn spawn()-> Self{
+        let tick_rate = std::time::Duration::from_millis(250);
+        let (tx, rx) = mpsc::unbounded_channel::<Actions>();
+        let _tx = tx.clone();
+        let _ = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tick_rate);
+            let mut reader = crossterm::event::EventStream::new();
+            loop {
+                let delay = interval.tick();
+                let crossterm_event = reader.next().fuse();
+                select! {
+                    maybe_event = crossterm_event =>{
+                        match maybe_event {
+                          Some(Ok(event)) => {
+                                handle_event(&_tx, event).unwrap()
+                            },
+                            Some(Err(_))=>{},
+                            None=>{}
+                        }
 
                     }
-                    return Ok(Event::MoveCursor(CursorMov::new(0,1)));
-                }
-                if  key.code == KeyCode::Char('k') {
-                    if key.modifiers.contains(mod1){
-                        file_log!(level="IDK", "going up");
-                        return Ok(Event::ChangePanel(CursorMov::new(0, -1)));
-                    }
-                    return Ok(Event::MoveCursor(CursorMov::new(0,-1)));
-                }
-                if key.code == KeyCode::Char('l') {
-                    if key.modifiers.contains(mod1){
-                        return Ok(Event::ChangePanel(CursorMov::new(1,0)));
-                    }
-                    return Ok(Event::MoveCursor(CursorMov::new(1,0)));
-                }
-                if key.code == KeyCode::Char('h') {
-                    if key.modifiers.contains(mod1){
-                        return Ok(Event::ChangePanel(CursorMov::new(-1,0)));
-                    }
-                    return Ok(Event::MoveCursor(CursorMov::new(-1,0)));
-                }
-                if  key.code == KeyCode::Enter {
-                    return Ok(Event::Click);
+                    _ = delay =>{
+                            tx.send(Actions::Tick).unwrap();
+                        }
                 }
             }
-        }
+        });   
+        return Self{rx}
     }
-    // Direction::Vertical()
-    Ok(Event::Continue)
+
+    pub fn new()-> Self{
+        return Self::spawn();
+    }
+    pub async fn next(&mut self) -> Result<Actions> {
+        let event = self.rx.recv().await.ok_or(anyhow!("event handler closed unexpectedlyt"))?;
+        Ok(event)
+  }
 }

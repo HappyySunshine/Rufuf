@@ -24,3 +24,12 @@ colors = {
     white = "#ABB2BF",
     black = "#191A21",
   }
+
+
+tree = {
+    folder = "cyan",
+    file = "white",
+    box = "black",
+    box_text = "fg",
+
+}

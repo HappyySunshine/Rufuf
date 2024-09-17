@@ -11,20 +11,33 @@ use rufuf::{cli, config};
 // use ratatui::backend::
 
 use file_logger::*;
-fn main() -> anyhow::Result<()> {
+
+
+
+async fn async_main() -> anyhow::Result<()> {
     LoggerConfig::new().file("log_file")?.commit();
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
     let mut lua = Lua::new();
     config::load_default(&mut lua)?;
     let terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
-    let result = cli::run(terminal,lua);
-    match result{
-        Ok(_) => {},
-        Err(e)=> {file_dbg!(e)},
-    }
+
+    let result = cli::run(terminal,lua).await;
     disable_raw_mode()?;
     stdout().execute(LeaveAlternateScreen)?;
+    match result{
+        Ok(_) => {},
+        Err(e)=> {
+            println!("ERROR: {:?}", e)},
+
+        }
     Ok(())
+}
+
+
+fn main(){
+   let rt = tokio::runtime::Runtime::new().unwrap();
+    let _ = rt.block_on(async_main());
+    rt.shutdown_background();
 }
 
